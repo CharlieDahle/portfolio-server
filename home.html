@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Drum Machine Grid</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        margin: 20px;
+      }
+      .grid {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        position: relative;
+      }
+      .track {
+        display: flex;
+        position: relative;
+        height: 40px;
+        background: #eee;
+      }
+      .beat-line {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 1px;
+        background: #ccc;
+        pointer-events: none;
+        z-index: 1;
+      }
+      .beat-line.major {
+        background: #999;
+        width: 2px;
+      }
+      .beat-zone {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 48px;
+        background: transparent;
+        pointer-events: none;
+        z-index: 0;
+        transition: background-color 0.1s ease;
+      }
+      .beat-zone.snap-mode {
+        pointer-events: auto;
+      }
+      .beat-zone.snap-mode:hover {
+        background: rgba(52, 152, 219, 0.1);
+      }
+      .playhead {
+        position: absolute;
+        top: -20px;
+        bottom: 0;
+        width: 2px;
+        background: #e74c3c;
+        z-index: 10;
+        pointer-events: none;
+        box-shadow: 0 0 4px rgba(231, 76, 60, 0.5);
+      }
+      .controls {
+        margin: 20px 0;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+      .play-button {
+        background: #27ae60;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 16px;
+      }
+      .play-button:hover {
+        background: #229954;
+      }
+      .play-button.playing {
+        background: #e74c3c;
+      }
+      .play-button.playing:hover {
+        background: #c0392b;
+      }
+      .stop-button {
+        background: #95a5a6;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 16px;
+      }
+      .stop-button:hover {
+        background: #7f8c8d;
+      }
+      .note {
+        position: absolute;
+        width: 48px;
+        height: 100%;
+        background: #3498db;
+        cursor: grab;
+      }
+      .note:hover {
+        outline: 2px solid red;
+        cursor: pointer;
+      }
+      .beat-marker {
+        position: absolute;
+        top: -20px;
+        font-size: 12px;
+        color: #333;
+      }
+      .marker-container {
+        position: relative;
+        height: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Drum Machine</h1>
+    <div class="controls">
+      <button id="playButton" class="play-button">▶ Play</button>
+      <button id="stopButton" class="stop-button">⏹ Stop</button>
+      <label
+        >BPM: <input type="number" id="bpmInput" value="120" min="60" max="300"
+      /></label>
+    </div>
+    <div class="marker-container" id="markerContainer"></div>
+    <div class="grid" id="grid"></div>
+    <label
+      ><input type="checkbox" id="snapToggle" checked /> Snap to beat</label
+    >
+
+    <script>
+      const grid = document.getElementById("grid");
+      const markerContainer = document.getElementById("markerContainer");
+      const snapToggle = document.getElementById("snapToggle");
+      const playButton = document.getElementById("playButton");
+      const stopButton = document.getElementById("stopButton");
+      const bpmInput = document.getElementById("bpmInput");
+
+      const tracks = 4;
+      const ticksPerBeat = 120; // MIDI standard - good balance of precision and performance
+      const totalBeats = 16;
+      const totalTicks = ticksPerBeat * totalBeats;
+      const pixelsPerTick = 0.4; // Increased to maintain visual width
+      const beatWidth = ticksPerBeat * pixelsPerTick;
+
+      const state = Array.from({ length: tracks }, () => ({}));
+      let noteIdCounter = 0;
+
+      // Playback state
+      let isPlaying = false;
+      let currentTick = 0;
+      let playbackStartTime = 0;
+      let animationFrameId = null;
+      let playhead = null;
+
+      // Function to update beat zone visibility
+      function updateBeatZones() {
+        const zones = document.querySelectorAll(".beat-zone");
+        zones.forEach((zone) => {
+          if (snapToggle.checked) {
+            zone.classList.add("snap-mode");
+          } else {
+            zone.classList.remove("snap-mode");
+          }
+        });
+      }
+
+      // Listen for snap toggle changes
+      snapToggle.addEventListener("change", updateBeatZones);
+
+      markerContainer.style.width = `${totalTicks * pixelsPerTick}px`;
+      for (let b = 0; b < totalBeats; b++) {
+        const marker = document.createElement("div");
+        marker.className = "beat-marker";
+        marker.style.left = `${b * beatWidth}px`;
+        marker.textContent = (b % 4) + 1;
+        markerContainer.appendChild(marker);
+      }
+
+      for (let t = 0; t < tracks; t++) {
+        const track = document.createElement("div");
+        track.className = "track";
+        track.style.width = `${totalTicks * pixelsPerTick}px`;
+        track.dataset.trackIndex = t;
+        track.addEventListener("mousedown", onTrackMouseDown);
+
+        // Add beat separator lines
+        for (let b = 0; b <= totalBeats; b++) {
+          const line = document.createElement("div");
+          line.className = b % 4 === 0 ? "beat-line major" : "beat-line";
+          line.style.left = `${b * beatWidth}px`;
+          track.appendChild(line);
+        }
+
+        // Add beat zones for hover effects
+        for (let b = 0; b < totalBeats; b++) {
+          const zone = document.createElement("div");
+          zone.className = "beat-zone";
+          zone.style.left = `${b * beatWidth}px`;
+          zone.dataset.beatIndex = b;
+          track.appendChild(zone);
+        }
+
+        grid.appendChild(track);
+      }
+
+      // Initialize beat zones
+      updateBeatZones();
+
+      // Create playhead
+      playhead = document.createElement("div");
+      playhead.className = "playhead";
+      playhead.style.left = "0px";
+      grid.appendChild(playhead);
+
+      // Play/pause functionality
+      function togglePlayback() {
+        if (isPlaying) {
+          stopPlayback();
+        } else {
+          startPlayback();
+        }
+      }
+
+      function startPlayback() {
+        isPlaying = true;
+        playButton.textContent = "⏸ Pause";
+        playButton.classList.add("playing");
+
+        playbackStartTime = performance.now();
+        const startTick = currentTick;
+
+        function updatePlayback() {
+          if (!isPlaying) return;
+
+          const now = performance.now();
+          const elapsed = now - playbackStartTime;
+
+          const bpm = parseInt(bpmInput.value);
+          const msPerBeat = (60 / bpm) * 1000;
+          const msPerTick = msPerBeat / ticksPerBeat;
+
+          // Calculate current tick based on elapsed time
+          const targetTick = startTick + Math.floor(elapsed / msPerTick);
+
+          // Update playhead position
+          currentTick = targetTick % totalTicks;
+          playhead.style.left = `${currentTick * pixelsPerTick}px`;
+
+          // Check for notes to "play" at current position
+          for (let trackIndex = 0; trackIndex < tracks; trackIndex++) {
+            if (state[trackIndex][currentTick]) {
+              // Visual feedback for "playing" notes
+              const noteEl = document.querySelector(
+                `[data-id="${state[trackIndex][currentTick]}"]`
+              );
+              if (noteEl) {
+                noteEl.style.background = "#e67e22";
+                setTimeout(() => {
+                  noteEl.style.background = "#3498db";
+                }, 100);
+              }
+            }
+          }
+
+          animationFrameId = requestAnimationFrame(updatePlayback);
+        }
+
+        updatePlayback();
+      }
+
+      function stopPlayback() {
+        isPlaying = false;
+        playButton.textContent = "▶ Play";
+        playButton.classList.remove("playing");
+
+        if (animationFrameId) {
+          cancelAnimationFrame(animationFrameId);
+          animationFrameId = null;
+        }
+      }
+
+      function stopAndReset() {
+        stopPlayback();
+        resetPlayhead();
+      }
+
+      function resetPlayhead() {
+        currentTick = 0;
+        if (playhead) {
+          playhead.style.left = "0px";
+        }
+      }
+
+      // Event listeners
+      playButton.addEventListener("click", togglePlayback);
+      stopButton.addEventListener("click", stopAndReset);
+
+      // Reset playhead when BPM changes during playback
+      bpmInput.addEventListener("input", () => {
+        if (isPlaying) {
+          stopPlayback();
+          startPlayback();
+        }
+      });
+
+      let dragging = false;
+      let draggedNote = null;
+      let offsetX = 0;
+      let startTrack = 0;
+      let hasDragged = false; // Track if we actually dragged
+
+      function createNote(trackEl, tick) {
+        const note = document.createElement("div");
+        note.className = "note";
+        note.style.left = `${tick * pixelsPerTick}px`;
+        note.dataset.tick = tick;
+        note.dataset.id = `note-${noteIdCounter++}`;
+
+        note.addEventListener("mousedown", (e) => {
+          if (e.button === 0) {
+            e.stopPropagation();
+            dragging = true;
+            draggedNote = note;
+            offsetX = e.offsetX;
+            startTrack = [...grid.children].indexOf(note.parentElement);
+            hasDragged = false; // Reset drag flag
+          }
+        });
+
+        note.addEventListener("click", (e) => {
+          e.stopPropagation();
+          // Only delete if we haven't dragged
+          if (!hasDragged) {
+            const tick = parseInt(note.dataset.tick);
+            const trackIndex = [...grid.children].indexOf(note.parentElement);
+            delete state[trackIndex][tick];
+            note.remove();
+          }
+        });
+
+        trackEl.appendChild(note);
+        const trackIndex = [...grid.children].indexOf(trackEl);
+        state[trackIndex][tick] = note.dataset.id;
+      }
+
+      function onTrackMouseDown(e) {
+        if (e.target.classList.contains("note")) return;
+        const trackEl = e.currentTarget;
+        const rect = trackEl.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const tick = x / pixelsPerTick;
+
+        let snappedTick;
+        if (snapToggle.checked) {
+          // In snap mode, determine which beat zone we clicked in
+          const beatIndex = Math.floor(tick / ticksPerBeat);
+          snappedTick = beatIndex * ticksPerBeat;
+        } else {
+          snappedTick = Math.round(tick);
+        }
+
+        const clampedTick = Math.max(0, Math.min(totalTicks - 1, snappedTick));
+        const trackIndex = parseInt(trackEl.dataset.trackIndex);
+
+        Array.from(trackEl.children).forEach((child) => {
+          if (parseInt(child.dataset.tick) === clampedTick) {
+            child.remove();
+          }
+        });
+        createNote(trackEl, clampedTick);
+      }
+
+      document.addEventListener("mousemove", (e) => {
+        if (!dragging || !draggedNote) return;
+
+        // Set the drag flag when we start moving
+        hasDragged = true;
+
+        const rect = grid.getBoundingClientRect();
+        const x = e.clientX - rect.left - offsetX;
+        const tick = x / pixelsPerTick;
+        const snappedTick = snapToggle.checked
+          ? Math.round(tick / ticksPerBeat) * ticksPerBeat
+          : tick;
+        const clampedTick = Math.max(0, Math.min(totalTicks - 1, snappedTick));
+        draggedNote.style.left = `${clampedTick * pixelsPerTick}px`;
+        draggedNote.dataset.tick = Math.round(clampedTick);
+      });
+
+      document.addEventListener("mouseup", (e) => {
+        if (!dragging || !draggedNote) return;
+        dragging = false;
+        const rect = grid.getBoundingClientRect();
+        const x = e.clientX - rect.left - offsetX;
+        const tick = x / pixelsPerTick;
+
+        let snappedTick;
+        if (snapToggle.checked) {
+          // In snap mode, determine which beat zone we're in
+          const beatIndex = Math.floor(tick / ticksPerBeat);
+          snappedTick = beatIndex * ticksPerBeat;
+        } else {
+          snappedTick = Math.round(tick);
+        }
+
+        const clampedTick = Math.max(0, Math.min(totalTicks - 1, snappedTick));
+
+        const trackEl = draggedNote.parentElement;
+        const trackIndex = [...grid.children].indexOf(trackEl);
+        state[trackIndex] = {};
+        draggedNote.style.left = `${clampedTick * pixelsPerTick}px`;
+        draggedNote.dataset.tick = clampedTick;
+        state[trackIndex][clampedTick] = draggedNote.dataset.id;
+        draggedNote = null;
+
+        // Reset the drag flag after a short delay to allow click event to check it
+        setTimeout(() => {
+          hasDragged = false;
+        }, 10);
+      });
+    </script>
+  </body>
+</html>
