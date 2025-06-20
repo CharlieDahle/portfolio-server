@@ -109,7 +109,19 @@ class DrumRoom {
 
 // Socket connection handling
 io.on("connection", (socket) => {
-  console.log("User connected:", socket.id);
+  console.log(`[${new Date().toISOString()}] User connected: ${socket.id}`);
+
+  socket.on("ping", () => {
+    console.log(`[${new Date().toISOString()}] Ping from ${socket.id}`);
+  });
+
+  socket.on("pong", (latency) => {
+    console.log(
+      `[${new Date().toISOString()}] Pong from ${
+        socket.id
+      }, latency: ${latency}ms`
+    );
+  });
 
   // Create new room
   socket.on("create-room", (callback) => {
@@ -247,7 +259,11 @@ io.on("connection", (socket) => {
 
   // Handle disconnection
   socket.on("disconnect", () => {
-    console.log("User disconnected:", socket.id);
+    console.log(
+      `[${new Date().toISOString()}] User disconnected: ${
+        socket.id
+      }, reason: ${reason}`
+    );
 
     // Remove user from all rooms they were in
     rooms.forEach((room, roomId) => {
