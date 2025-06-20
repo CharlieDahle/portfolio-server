@@ -276,6 +276,10 @@ io.on("connection", (socket) => {
       }
     });
   });
+
+  socket.on("error", (err) => {
+    console.error(`[${new Date().toISOString()}] Socket error:`, err.message);
+  });
 });
 
 // Cleanup old empty rooms periodically
