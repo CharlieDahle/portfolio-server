@@ -260,9 +260,7 @@ io.on("connection", (socket) => {
   // Handle disconnection
   socket.on("disconnect", () => {
     console.log(
-      `[${new Date().toISOString()}] User disconnected: ${
-        socket.id
-      }, reason: ${reason}`
+      `[${new Date().toISOString()}] User disconnected: ${socket.id}`
     );
 
     // Remove user from all rooms they were in
