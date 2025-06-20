@@ -10,9 +10,6 @@ const io = socketIo(server, {
     origin: "*",
     methods: ["GET", "POST"],
   },
-  pingTimeout: 60000, // 60 seconds (was 20s default)
-  pingInterval: 25000, // 25 seconds (same as default)
-  upgradeTimeout: 30000, // 30 seconds (was 10s default)
 });
 
 // Simple room storage - just data, no playback logic
