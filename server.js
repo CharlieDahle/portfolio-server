@@ -205,7 +205,7 @@ io.on("connection", (socket) => {
     }
 
     // Broadcast change to all users in room (including sender for confirmation)
-    io.to(roomId).emit("pattern-update", change);
+    socket.to(roomId).emit("pattern-update", change);
   });
 
   // Handle transport commands (play/pause/stop)
@@ -225,7 +225,7 @@ io.on("connection", (socket) => {
     };
 
     // Broadcast to all users in room with timestamp
-    io.to(roomId).emit("transport-sync", syncCommand);
+    socket.to(roomId).emit("transport-sync", syncCommand);
   });
 
   // Handle BPM changes
@@ -241,7 +241,7 @@ io.on("connection", (socket) => {
     room.setBpm(bpm);
 
     // Broadcast BPM change to all users
-    io.to(roomId).emit("bpm-change", {
+    socket.to(roomId).emit("bpm-change", {
       bpm: room.bpm,
       timestamp: Date.now(),
     });
