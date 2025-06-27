@@ -21,6 +21,7 @@ class DrumRoom {
     this.bpm = 120;
     this.measureCount = 4; // Add measure count to room state
     this.pattern = new Map(); // trackId -> Set of tick positions
+    this.tracks = new Map(); // trackId -> track data (name, color, soundFile, etc.)
     this.users = new Set();
     this.lastActivity = Date.now();
 
@@ -29,9 +30,40 @@ class DrumRoom {
   }
 
   initializeDefaultTracks() {
-    const defaultTracks = ["kick", "snare", "hihat", "openhat"];
-    defaultTracks.forEach((trackId) => {
-      this.pattern.set(trackId, new Set());
+    const defaultTracks = [
+      {
+        id: "kick",
+        name: "Kick",
+        color: "#e74c3c",
+        soundFile: "kicks/Ac_K.wav",
+        availableSounds: [],
+      },
+      {
+        id: "snare",
+        name: "Snare",
+        color: "#f39c12",
+        soundFile: "snares/Box_Snr2.wav",
+        availableSounds: [],
+      },
+      {
+        id: "hihat",
+        name: "Hi-Hat",
+        color: "#2ecc71",
+        soundFile: "hihats/Jls_H.wav",
+        availableSounds: [],
+      },
+      {
+        id: "openhat",
+        name: "Open Hat",
+        color: "#3498db",
+        soundFile: "cymbals/CL_OHH1.wav",
+        availableSounds: [],
+      },
+    ];
+
+    defaultTracks.forEach((track) => {
+      this.tracks.set(track.id, track);
+      this.pattern.set(track.id, new Set());
     });
   }
 
@@ -94,11 +126,15 @@ class DrumRoom {
       serializedPattern[trackId] = Array.from(tickSet);
     }
 
+    // Convert tracks Map to Array
+    const serializedTracks = Array.from(this.tracks.values());
+
     return {
       id: this.id,
       bpm: this.bpm,
       measureCount: this.measureCount, // Include measure count in state
       pattern: serializedPattern,
+      tracks: serializedTracks, // Include tracks in state
       users: Array.from(this.users),
     };
   }
@@ -112,6 +148,28 @@ class DrumRoom {
   setMeasureCount(newMeasureCount) {
     this.measureCount = Math.max(1, Math.min(16, newMeasureCount)); // Clamp between 1-16
     this.lastActivity = Date.now();
+  }
+
+  // Track management
+  addTrack(trackData) {
+    this.tracks.set(trackData.id, trackData);
+    this.pattern.set(trackData.id, new Set());
+    this.lastActivity = Date.now();
+  }
+
+  removeTrack(trackId) {
+    this.tracks.delete(trackId);
+    this.pattern.delete(trackId);
+    this.lastActivity = Date.now();
+  }
+
+  updateTrackSound(trackId, newSoundFile) {
+    if (this.tracks.has(trackId)) {
+      const track = this.tracks.get(trackId);
+      track.soundFile = newSoundFile;
+      this.tracks.set(trackId, track);
+      this.lastActivity = Date.now();
+    }
   }
 }
 
@@ -249,7 +307,7 @@ io.on("connection", (socket) => {
     room.setBpm(bpm);
 
     // Broadcast BPM change to all users
-    socket.to(roomId).emit("bmp-change", {
+    socket.to(roomId).emit("bpm-change", {
       bpm: room.bpm,
       timestamp: Date.now(),
     });
@@ -275,6 +333,134 @@ io.on("connection", (socket) => {
     // Broadcast measure count change to all users
     socket.to(roomId).emit("measure-count-change", {
       measureCount: room.measureCount,
+      timestamp: Date.now(),
+    });
+  });
+
+  // Handle track addition
+  socket.on("add-track", ({ roomId, trackData }) => {
+    const room = rooms.get(roomId);
+    if (!room || !room.users.has(socket.id)) {
+      console.log(`Invalid add track request:`, { roomId, userId: socket.id });
+      return;
+    }
+
+    console.log(`Track added in room ${roomId}:`, trackData);
+
+    room.addTrack(trackData);
+
+    // Broadcast track addition to all users (excluding sender)
+    socket.to(roomId).emit("track-added", {
+      trackData,
+      timestamp: Date.now(),
+    });
+  });
+
+  // Handle track removal
+  socket.on("remove-track", ({ roomId, trackId }) => {
+    const room = rooms.get(roomId);
+    if (!room || !room.users.has(socket.id)) {
+      console.log(`Invalid remove track request:`, {
+        roomId,
+        userId: socket.id,
+      });
+      return;
+    }
+
+    console.log(`Track removed in room ${roomId}:`, trackId);
+
+    room.removeTrack(trackId);
+
+    // Broadcast track removal to all users (excluding sender)
+    socket.to(roomId).emit("track-removed", {
+      trackId,
+      timestamp: Date.now(),
+    });
+  });
+
+  // Handle track sound changes
+  socket.on("update-track-sound", ({ roomId, trackId, soundFile }) => {
+    const room = rooms.get(roomId);
+    if (!room || !room.users.has(socket.id)) {
+      console.log(`Invalid track sound update:`, { roomId, userId: socket.id });
+      return;
+    }
+
+    console.log(`Track sound updated in room ${roomId}:`, {
+      trackId,
+      soundFile,
+    });
+
+    room.updateTrackSound(trackId, soundFile);
+
+    // Broadcast sound change to all users (excluding sender)
+    socket.to(roomId).emit("track-sound-updated", {
+      trackId,
+      soundFile,
+      timestamp: Date.now(),
+    });
+  });
+
+  // Handle track addition
+  socket.on("add-track", ({ roomId, trackData }) => {
+    const room = rooms.get(roomId);
+    if (!room || !room.users.has(socket.id)) {
+      console.log(`Invalid add track request:`, { roomId, userId: socket.id });
+      return;
+    }
+
+    console.log(`Track added in room ${roomId}:`, trackData);
+
+    room.addTrack(trackData);
+
+    // Broadcast track addition to all users
+    socket.to(roomId).emit("track-added", {
+      trackData,
+      timestamp: Date.now(),
+    });
+  });
+
+  // Handle track removal
+  socket.on("remove-track", ({ roomId, trackId }) => {
+    const room = rooms.get(roomId);
+    if (!room || !room.users.has(socket.id)) {
+      console.log(`Invalid remove track request:`, {
+        roomId,
+        userId: socket.id,
+      });
+      return;
+    }
+
+    console.log(`Track removed in room ${roomId}:`, trackId);
+
+    room.removeTrack(trackId);
+
+    // Broadcast track removal to all users
+    socket.to(roomId).emit("track-removed", {
+      trackId,
+      timestamp: Date.now(),
+    });
+  });
+
+  // Handle track sound changes
+  socket.on("update-track-sound", ({ roomId, trackId, soundFile }) => {
+    const room = rooms.get(roomId);
+    if (!room || !room.users.has(socket.id)) {
+      console.log(`Invalid track sound update:`, { roomId, userId: socket.id });
+      return;
+    }
+
+    console.log(`Track sound updated in room ${roomId}:`, {
+      trackId,
+      soundFile,
+    });
+
+    room.updateTrackSound(trackId, soundFile);
+
+    // Broadcast sound change to all users
+    socket.to(roomId).emit("track-sound-updated", {
+      trackId,
+      soundFile,
       timestamp: Date.now(),
     });
   });
