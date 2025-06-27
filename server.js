@@ -19,6 +19,7 @@ class DrumRoom {
   constructor(id) {
     this.id = id;
     this.bpm = 120;
+    this.measureCount = 4; // Add measure count to room state
     this.pattern = new Map(); // trackId -> Set of tick positions
     this.users = new Set();
     this.lastActivity = Date.now();
@@ -96,6 +97,7 @@ class DrumRoom {
     return {
       id: this.id,
       bpm: this.bpm,
+      measureCount: this.measureCount, // Include measure count in state
       pattern: serializedPattern,
       users: Array.from(this.users),
     };
@@ -103,6 +105,12 @@ class DrumRoom {
 
   setBpm(newBpm) {
     this.bpm = Math.max(60, Math.min(300, newBpm)); // Clamp between 60-300
+    this.lastActivity = Date.now();
+  }
+
+  // Add measure count management
+  setMeasureCount(newMeasureCount) {
+    this.measureCount = Math.max(1, Math.min(16, newMeasureCount)); // Clamp between 1-16
     this.lastActivity = Date.now();
   }
 }
@@ -241,8 +249,32 @@ io.on("connection", (socket) => {
     room.setBpm(bpm);
 
     // Broadcast BPM change to all users
-    socket.to(roomId).emit("bpm-change", {
+    socket.to(roomId).emit("bmp-change", {
       bpm: room.bpm,
+      timestamp: Date.now(),
+    });
+  });
+
+  // Handle measure count changes
+  socket.on("set-measure-count", ({ roomId, measureCount }) => {
+    const room = rooms.get(roomId);
+    if (!room || !room.users.has(socket.id)) {
+      console.log(`Invalid measure count change:`, {
+        roomId,
+        userId: socket.id,
+      });
+      return;
+    }
+
+    console.log(
+      `Measure count change in room ${roomId}: ${room.measureCount} -> ${measureCount}`
+    );
+
+    room.setMeasureCount(measureCount);
+
+    // Broadcast measure count change to all users
+    socket.to(roomId).emit("measure-count-change", {
+      measureCount: room.measureCount,
       timestamp: Date.now(),
     });
   });
