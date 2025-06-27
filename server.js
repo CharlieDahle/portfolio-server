@@ -337,6 +337,7 @@ io.on("connection", (socket) => {
     });
   });
 
+  // FIXED: Track management handlers (removed duplicates)
   // Handle track addition
   socket.on("add-track", ({ roomId, trackData }) => {
     const room = rooms.get(roomId);
@@ -394,70 +395,6 @@ io.on("connection", (socket) => {
     room.updateTrackSound(trackId, soundFile);
 
     // Broadcast sound change to all users (excluding sender)
-    socket.to(roomId).emit("track-sound-updated", {
-      trackId,
-      soundFile,
-      timestamp: Date.now(),
-    });
-  });
-
-  // Handle track addition
-  socket.on("add-track", ({ roomId, trackData }) => {
-    const room = rooms.get(roomId);
-    if (!room || !room.users.has(socket.id)) {
-      console.log(`Invalid add track request:`, { roomId, userId: socket.id });
-      return;
-    }
-
-    console.log(`Track added in room ${roomId}:`, trackData);
-
-    room.addTrack(trackData);
-
-    // Broadcast track addition to all users
-    socket.to(roomId).emit("track-added", {
-      trackData,
-      timestamp: Date.now(),
-    });
-  });
-
-  // Handle track removal
-  socket.on("remove-track", ({ roomId, trackId }) => {
-    const room = rooms.get(roomId);
-    if (!room || !room.users.has(socket.id)) {
-      console.log(`Invalid remove track request:`, {
-        roomId,
-        userId: socket.id,
-      });
-      return;
-    }
-
-    console.log(`Track removed in room ${roomId}:`, trackId);
-
-    room.removeTrack(trackId);
-
-    // Broadcast track removal to all users
-    socket.to(roomId).emit("track-removed", {
-      trackId,
-      timestamp: Date.now(),
-    });
-  });
-
-  // Handle track sound changes
-  socket.on("update-track-sound", ({ roomId, trackId, soundFile }) => {
-    const room = rooms.get(roomId);
-    if (!room || !room.users.has(socket.id)) {
-      console.log(`Invalid track sound update:`, { roomId, userId: socket.id });
-      return;
-    }
-
-    console.log(`Track sound updated in room ${roomId}:`, {
-      trackId,
-      soundFile,
-    });
-
-    room.updateTrackSound(trackId, soundFile);
-
-    // Broadcast sound change to all users
     socket.to(roomId).emit("track-sound-updated", {
       trackId,
       soundFile,
