@@ -20,7 +20,7 @@ class DrumRoom {
     this.id = id;
     this.bpm = 120;
     this.measureCount = 4; // Add measure count to room state
-    this.pattern = new Map(); // trackId -> Set of tick positions
+    this.pattern = new Map(); // trackId -> Array of note objects {tick, velocity}
     this.tracks = new Map(); // trackId -> track data (name, color, soundFile, etc.)
     this.users = new Set();
     this.lastActivity = Date.now();
@@ -63,7 +63,7 @@ class DrumRoom {
 
     defaultTracks.forEach((track) => {
       this.tracks.set(track.id, track);
-      this.pattern.set(track.id, new Set());
+      this.pattern.set(track.id, []); // Array instead of Set
     });
   }
 
@@ -83,47 +83,81 @@ class DrumRoom {
     }
   }
 
-  // Add a note at specific tick position
-  addNote(trackId, tick) {
+  // Add a note at specific tick position with velocity
+  addNote(trackId, tick, velocity = 4) {
     if (!this.pattern.has(trackId)) {
-      this.pattern.set(trackId, new Set());
+      this.pattern.set(trackId, []);
     }
-    this.pattern.get(trackId).add(tick);
-    this.lastActivity = Date.now();
+
+    const trackNotes = this.pattern.get(trackId);
+
+    // Check if note already exists at this tick
+    const existingNoteIndex = trackNotes.findIndex(
+      (note) => note.tick === tick
+    );
+
+    if (existingNoteIndex === -1) {
+      // Add new note
+      trackNotes.push({ tick, velocity: Math.max(1, Math.min(4, velocity)) });
+      this.lastActivity = Date.now();
+    }
+    // If note exists, don't add duplicate
   }
 
   // Remove a note from specific tick position
   removeNote(trackId, tick) {
     if (this.pattern.has(trackId)) {
-      this.pattern.get(trackId).delete(tick);
+      const trackNotes = this.pattern.get(trackId);
+      const filteredNotes = trackNotes.filter((note) => note.tick !== tick);
+      this.pattern.set(trackId, filteredNotes);
       this.lastActivity = Date.now();
+    }
+  }
+
+  // Update note velocity
+  updateNoteVelocity(trackId, tick, velocity) {
+    if (this.pattern.has(trackId)) {
+      const trackNotes = this.pattern.get(trackId);
+      const noteIndex = trackNotes.findIndex((note) => note.tick === tick);
+
+      if (noteIndex !== -1) {
+        trackNotes[noteIndex].velocity = Math.max(1, Math.min(4, velocity));
+        this.lastActivity = Date.now();
+      }
     }
   }
 
   // Move a note from one position to another
   moveNote(trackId, fromTick, toTick) {
     if (this.pattern.has(trackId)) {
-      const trackPattern = this.pattern.get(trackId);
-      trackPattern.delete(fromTick);
-      trackPattern.add(toTick);
-      this.lastActivity = Date.now();
+      const trackNotes = this.pattern.get(trackId);
+      const noteIndex = trackNotes.findIndex((note) => note.tick === fromTick);
+
+      if (noteIndex !== -1) {
+        const noteToMove = trackNotes[noteIndex];
+        // Remove from old position
+        trackNotes.splice(noteIndex, 1);
+        // Add at new position
+        trackNotes.push({ ...noteToMove, tick: toTick });
+        this.lastActivity = Date.now();
+      }
     }
   }
 
   // Clear entire track
   clearTrack(trackId) {
     if (this.pattern.has(trackId)) {
-      this.pattern.get(trackId).clear();
+      this.pattern.set(trackId, []);
       this.lastActivity = Date.now();
     }
   }
 
   // Get current room state for sending to clients
   getState() {
-    // Convert Sets to Arrays for JSON serialization
+    // Convert pattern Map to object with arrays
     const serializedPattern = {};
-    for (const [trackId, tickSet] of this.pattern.entries()) {
-      serializedPattern[trackId] = Array.from(tickSet);
+    for (const [trackId, noteArray] of this.pattern.entries()) {
+      serializedPattern[trackId] = noteArray; // Already an array
     }
 
     // Convert tracks Map to Array
@@ -132,9 +166,9 @@ class DrumRoom {
     return {
       id: this.id,
       bpm: this.bpm,
-      measureCount: this.measureCount, // Include measure count in state
+      measureCount: this.measureCount,
       pattern: serializedPattern,
-      tracks: serializedTracks, // Include tracks in state
+      tracks: serializedTracks,
       users: Array.from(this.users),
     };
   }
@@ -153,7 +187,7 @@ class DrumRoom {
   // Track management
   addTrack(trackData) {
     this.tracks.set(trackData.id, trackData);
-    this.pattern.set(trackData.id, new Set());
+    this.pattern.set(trackData.id, []); // Empty array for new track
     this.lastActivity = Date.now();
   }
 
@@ -234,7 +268,7 @@ io.on("connection", (socket) => {
     });
   });
 
-  // Handle pattern changes
+  // Handle pattern changes - NOW WITH VELOCITY SUPPORT
   socket.on("pattern-change", ({ roomId, change }) => {
     const room = rooms.get(roomId);
     if (!room || !room.users.has(socket.id)) {
@@ -250,11 +284,15 @@ io.on("connection", (socket) => {
     // Apply the change to room state
     switch (change.type) {
       case "add-note":
-        room.addNote(change.trackId, change.tick);
+        room.addNote(change.trackId, change.tick, change.velocity);
         break;
 
       case "remove-note":
         room.removeNote(change.trackId, change.tick);
+        break;
+
+      case "update-note-velocity":
+        room.updateNoteVelocity(change.trackId, change.tick, change.velocity);
         break;
 
       case "move-note":
@@ -294,7 +332,7 @@ io.on("connection", (socket) => {
     socket.to(roomId).emit("transport-sync", syncCommand);
   });
 
-  // Handle BPM changes
+  // Handle BPM changes - FIXED EVENT NAME
   socket.on("set-bpm", ({ roomId, bpm }) => {
     const room = rooms.get(roomId);
     if (!room || !room.users.has(socket.id)) {
@@ -306,7 +344,7 @@ io.on("connection", (socket) => {
 
     room.setBpm(bpm);
 
-    // Broadcast BPM change to all users
+    // Broadcast BPM change to all users - FIXED EVENT NAME
     socket.to(roomId).emit("bpm-change", {
       bpm: room.bpm,
       timestamp: Date.now(),
@@ -337,7 +375,7 @@ io.on("connection", (socket) => {
     });
   });
 
-  // FIXED: Track management handlers (removed duplicates)
+  // Track management handlers
   // Handle track addition
   socket.on("add-track", ({ roomId, trackData }) => {
     const room = rooms.get(roomId);
