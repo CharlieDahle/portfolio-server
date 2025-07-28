@@ -470,6 +470,26 @@ io.on("connection", (socket) => {
     });
   });
 
+  socket.on("leave-room", ({ roomId }) => {
+    const room = rooms.get(roomId);
+    if (!room || !room.users.has(socket.id)) {
+      console.log(`Invalid leave room request:`, { roomId, userId: socket.id });
+      return;
+    }
+
+    console.log(`User ${socket.id} left room ${roomId}`);
+
+    // Remove user from room but keep socket connection alive
+    socket.leave(roomId);
+    room.removeUser(socket.id);
+
+    // Notify remaining users in room
+    socket.to(roomId).emit("user-left", {
+      userId: socket.id,
+      userCount: room.users.size,
+    });
+  });
+
   socket.on("error", (err) => {
     console.error(`[${new Date().toISOString()}] Socket error:`, err.message);
   });
