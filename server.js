@@ -268,7 +268,7 @@ io.on("connection", (socket) => {
     });
   });
 
-  // Handle pattern changes - NOW WITH VELOCITY SUPPORT
+  // Handle pattern changes
   socket.on("pattern-change", ({ roomId, change }) => {
     const room = rooms.get(roomId);
     if (!room || !room.users.has(socket.id)) {
@@ -308,7 +308,7 @@ io.on("connection", (socket) => {
         return;
     }
 
-    // Broadcast change to all users in room (including sender for confirmation)
+    // Broadcast change to all users in room (excluding sender)
     socket.to(roomId).emit("pattern-update", change);
   });
 
@@ -332,7 +332,7 @@ io.on("connection", (socket) => {
     socket.to(roomId).emit("transport-sync", syncCommand);
   });
 
-  // Handle BPM changes - FIXED EVENT NAME
+  // Handle BPM changes
   socket.on("set-bpm", ({ roomId, bpm }) => {
     const room = rooms.get(roomId);
     if (!room || !room.users.has(socket.id)) {
@@ -344,7 +344,7 @@ io.on("connection", (socket) => {
 
     room.setBpm(bpm);
 
-    // Broadcast BPM change to all users - FIXED EVENT NAME
+    // Broadcast BPM change to all users
     socket.to(roomId).emit("bpm-change", {
       bpm: room.bpm,
       timestamp: Date.now(),
@@ -375,7 +375,6 @@ io.on("connection", (socket) => {
     });
   });
 
-  // Track management handlers
   // Handle track addition
   socket.on("add-track", ({ roomId, trackData }) => {
     const room = rooms.get(roomId);
@@ -436,6 +435,51 @@ io.on("connection", (socket) => {
     socket.to(roomId).emit("track-sound-updated", {
       trackId,
       soundFile,
+      timestamp: Date.now(),
+    });
+  });
+
+  // ============================================================================
+  // DYNAMIC EFFECTS SYSTEM
+  // ============================================================================
+
+  // Handle effect chain updates (complete enabled effects state)
+  socket.on("effect-chain-update", ({ roomId, trackId, enabledEffects }) => {
+    const room = rooms.get(roomId);
+    if (!room || !room.users.has(socket.id)) {
+      console.log(`Invalid effect chain update:`, {
+        roomId,
+        userId: socket.id,
+      });
+      return;
+    }
+
+    console.log(`Effect chain update in room ${roomId}:`, {
+      trackId,
+      enabledEffects,
+    });
+
+    // Broadcast effect chain update to all users (excluding sender)
+    socket.to(roomId).emit("effect-chain-update", {
+      trackId,
+      enabledEffects,
+      timestamp: Date.now(),
+    });
+  });
+
+  // Handle effect reset (clears all effects for a track)
+  socket.on("effect-reset", ({ roomId, trackId }) => {
+    const room = rooms.get(roomId);
+    if (!room || !room.users.has(socket.id)) {
+      console.log(`Invalid effect reset:`, { roomId, userId: socket.id });
+      return;
+    }
+
+    console.log(`Effect reset in room ${roomId}:`, trackId);
+
+    // Broadcast effect reset to all users (excluding sender)
+    socket.to(roomId).emit("effect-reset", {
+      trackId,
       timestamp: Date.now(),
     });
   });
@@ -510,6 +554,6 @@ setInterval(() => {
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`Simplified drum server running on port ${PORT}`);
+  console.log(`Drum server with dynamic effects running on port ${PORT}`);
   console.log(`Server architecture: Pattern storage + Command broadcasting`);
 });
