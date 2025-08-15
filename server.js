@@ -76,10 +76,12 @@ class DrumRoom {
     this.users.delete(userId);
     this.lastActivity = Date.now();
 
-    // Auto-cleanup empty rooms
+    // Don't immediately delete empty rooms
+    // Let the cleanup interval handle it after 2 minutes
     if (this.users.size === 0) {
-      rooms.delete(this.id);
-      console.log(`Room ${this.id} deleted - no users`);
+      console.log(
+        `Room ${this.id} is now empty - will cleanup in 2 minutes if no one rejoins`
+      );
     }
   }
 
@@ -165,7 +167,7 @@ class DrumRoom {
 
     return {
       id: this.id,
-      bpm: this.bpm,
+      bmp: this.bpm,
       measureCount: this.measureCount,
       pattern: serializedPattern,
       tracks: serializedTracks,
@@ -539,21 +541,27 @@ io.on("connection", (socket) => {
   });
 });
 
-// Cleanup old empty rooms periodically
+// Updated cleanup with 2-minute grace period for empty rooms only
 setInterval(() => {
   const now = Date.now();
-  const ROOM_TIMEOUT = 1000 * 60 * 60; // 1 hour
+  const EMPTY_ROOM_TIMEOUT = 1000 * 60 * 2; // 2 minutes for empty rooms
 
   rooms.forEach((room, roomId) => {
-    if (room.users.size === 0 && now - room.lastActivity > ROOM_TIMEOUT) {
+    // Only clean up empty rooms after 2 minutes
+    if (room.users.size === 0 && now - room.lastActivity > EMPTY_ROOM_TIMEOUT) {
       rooms.delete(roomId);
-      console.log(`Cleaned up old room: ${roomId}`);
+      console.log(`Cleaned up empty room: ${roomId} (empty for 2+ minutes)`);
     }
+    // Active rooms with users are NEVER auto-deleted
   });
-}, 1000 * 60 * 15); // Check every 15 minutes
+}, 1000 * 30); // Check every 30 seconds
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`Drum server with dynamic effects running on port ${PORT}`);
-  console.log(`Server architecture: Pattern storage + Command broadcasting`);
+  console.log(
+    `Drum server with 2-minute room persistence running on port ${PORT}`
+  );
+  console.log(
+    `Room cleanup: Empty rooms deleted after 2 minutes, active rooms persist indefinitely`
+  );
 });
