@@ -1,13 +1,248 @@
+require("dotenv").config();
 const express = require("express");
 const http = require("http");
 const socketIo = require("socket.io");
 const { v4: uuidv4 } = require("uuid");
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
+const { Pool } = require("pg");
+const cors = require("cors");
 
 const app = express();
 const server = http.createServer(app);
+
+// Database setup
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl:
+    process.env.NODE_ENV === "production"
+      ? { rejectUnauthorized: false }
+      : false,
+});
+
+// Middleware
+app.use(
+  cors({
+    origin: ["http://localhost:5173", "https://charliedahle.me"],
+    credentials: true,
+  })
+);
+app.use(express.json());
+
+// JWT Middleware
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers["authorization"];
+  const token = authHeader && authHeader.split(" ")[1];
+
+  if (!token) {
+    return res.status(401).json({ error: "Access token required" });
+  }
+
+  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+    if (err) {
+      return res.status(403).json({ error: "Invalid token" });
+    }
+    req.user = user;
+    next();
+  });
+};
+
+// ============================================================================
+// AUTH ROUTES
+// ============================================================================
+
+// Register
+app.post("/api/auth/register", async (req, res) => {
+  try {
+    const { username, password } = req.body;
+
+    if (!username || !password) {
+      return res.status(400).json({ error: "Username and password required" });
+    }
+
+    if (password.length < 6) {
+      return res
+        .status(400)
+        .json({ error: "Password must be at least 6 characters" });
+    }
+
+    // Check if username exists
+    const existingUser = await pool.query(
+      "SELECT id FROM users WHERE username = $1",
+      [username]
+    );
+    if (existingUser.rows.length > 0) {
+      return res.status(400).json({ error: "Username already exists" });
+    }
+
+    // Hash password
+    const saltRounds = 10;
+    const passwordHash = await bcrypt.hash(password, saltRounds);
+
+    // Create user
+    const result = await pool.query(
+      "INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING id, username, created_at",
+      [username, passwordHash]
+    );
+
+    const user = result.rows[0];
+
+    // Generate JWT
+    const token = jwt.sign(
+      { userId: user.id, username: user.username },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    res.status(201).json({
+      message: "User created successfully",
+      user: { id: user.id, username: user.username },
+      token,
+    });
+  } catch (error) {
+    console.error("Registration error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Login
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { username, password } = req.body;
+
+    if (!username || !password) {
+      return res.status(400).json({ error: "Username and password required" });
+    }
+
+    // Find user
+    const result = await pool.query("SELECT * FROM users WHERE username = $1", [
+      username,
+    ]);
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    const user = result.rows[0];
+
+    // Check password
+    const passwordMatch = await bcrypt.compare(password, user.password_hash);
+    if (!passwordMatch) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    // Generate JWT
+    const token = jwt.sign(
+      { userId: user.id, username: user.username },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    res.json({
+      message: "Login successful",
+      user: { id: user.id, username: user.username },
+      token,
+    });
+  } catch (error) {
+    console.error("Login error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ============================================================================
+// BEATS ROUTES
+// ============================================================================
+
+// Get user's beats
+app.get("/api/beats", authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT id, name, bpm, measure_count, created_at, updated_at FROM beats WHERE user_id = $1 ORDER BY updated_at DESC",
+      [req.user.userId]
+    );
+
+    res.json({ beats: result.rows });
+  } catch (error) {
+    console.error("Get beats error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Save a beat
+app.post("/api/beats", authenticateToken, async (req, res) => {
+  try {
+    const { name, patternData, tracksConfig, bpm, measureCount } = req.body;
+
+    if (!name || !patternData || !tracksConfig) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const result = await pool.query(
+      "INSERT INTO beats (user_id, name, pattern_data, tracks_config, bpm, measure_count) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *",
+      [
+        req.user.userId,
+        name,
+        JSON.stringify(patternData),
+        JSON.stringify(tracksConfig),
+        bpm || 120,
+        measureCount || 4,
+      ]
+    );
+
+    const beat = result.rows[0];
+    res.status(201).json({
+      message: "Beat saved successfully",
+      beat: {
+        id: beat.id,
+        name: beat.name,
+        bpm: beat.bpm,
+        measureCount: beat.measure_count,
+        createdAt: beat.created_at,
+      },
+    });
+  } catch (error) {
+    console.error("Save beat error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Load a specific beat
+app.get("/api/beats/:id", authenticateToken, async (req, res) => {
+  try {
+    const beatId = req.params.id;
+
+    const result = await pool.query(
+      "SELECT * FROM beats WHERE id = $1 AND user_id = $2",
+      [beatId, req.user.userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Beat not found" });
+    }
+
+    const beat = result.rows[0];
+    res.json({
+      id: beat.id,
+      name: beat.name,
+      patternData: beat.pattern_data,
+      tracksConfig: beat.tracks_config,
+      bpm: beat.bpm,
+      measureCount: beat.measure_count,
+      createdAt: beat.created_at,
+      updatedAt: beat.updated_at,
+    });
+  } catch (error) {
+    console.error("Load beat error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ============================================================================
+// EXISTING WEBSOCKET CODE (unchanged)
+// ============================================================================
+
 const io = socketIo(server, {
   cors: {
-    origin: "*",
+    origin: ["http://localhost:5173", "https://charliedahle.me"],
     methods: ["GET", "POST"],
   },
 });
@@ -558,10 +793,7 @@ setInterval(() => {
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(
-    `Drum server with 2-minute room persistence running on port ${PORT}`
-  );
-  console.log(
-    `Room cleanup: Empty rooms deleted after 2 minutes, active rooms persist indefinitely`
-  );
+  console.log(`Server running on port ${PORT}`);
+  console.log(`Auth API available at /api/auth/* and /api/beats/*`);
+  console.log(`WebSocket drum machine running with 2-minute room persistence`);
 });
