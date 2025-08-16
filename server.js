@@ -167,7 +167,7 @@ class DrumRoom {
 
     return {
       id: this.id,
-      bmp: this.bpm,
+      bpm: this.bpm,
       measureCount: this.measureCount,
       pattern: serializedPattern,
       tracks: serializedTracks,
