@@ -236,6 +236,59 @@ app.get("/api/beats/:id", authenticateToken, async (req, res) => {
   }
 });
 
+app.put("/api/beats/:id", authenticateToken, async (req, res) => {
+  try {
+    const beatId = req.params.id;
+    const { name, patternData, tracksConfig, bpm, measureCount } = req.body;
+
+    if (!name || !patternData || !tracksConfig) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    // First, verify the beat exists and belongs to the user
+    const existingBeat = await pool.query(
+      "SELECT id FROM beats WHERE id = $1 AND user_id = $2",
+      [beatId, req.user.userId]
+    );
+
+    if (existingBeat.rows.length === 0) {
+      return res
+        .status(404)
+        .json({ error: "Beat not found or not owned by user" });
+    }
+
+    // Update the beat
+    const result = await pool.query(
+      "UPDATE beats SET name = $1, pattern_data = $2, tracks_config = $3, bpm = $4, measure_count = $5, updated_at = CURRENT_TIMESTAMP WHERE id = $6 AND user_id = $7 RETURNING *",
+      [
+        name,
+        JSON.stringify(patternData),
+        JSON.stringify(tracksConfig),
+        bpm || 120,
+        measureCount || 4,
+        beatId,
+        req.user.userId,
+      ]
+    );
+
+    const beat = result.rows[0];
+    res.json({
+      message: "Beat updated successfully",
+      beat: {
+        id: beat.id,
+        name: beat.name,
+        bpm: beat.bpm,
+        measureCount: beat.measure_count,
+        created_at: beat.created_at,
+        updated_at: beat.updated_at,
+      },
+    });
+  } catch (error) {
+    console.error("Update beat error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // ============================================================================
 // EXISTING WEBSOCKET CODE (unchanged)
 // ============================================================================
